@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Order Availability</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #faf7f4; font-family: Georgia, 'Times New Roman', serif; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 2rem 1rem; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  @keyframes fadein { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const STORAGE_KEY = "sock-shop-orders-v1";
+const MAX_SLOTS   = 2;
+const ADMIN_PIN   = "1234"; // change this to your own PIN
+const PALETTE     = ["#C9A87C","#8FADA8","#B89CB5","#A8BA90","#C4907A","#8899B5","#C4A89A","#9AB5B0"];
+
+function today()       { const d = new Date(); d.setHours(0,0,0,0); return d; }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function fmtS(d)       { return new Date(d).toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+
+function countOverlaps(orders, s, e, excludeId) {
+  return orders.filter(o => o.id !== excludeId && new Date(o.startDate) < e && new Date(o.endDate) > s).length;
+}
+function findSlot(orders, durationDays) {
+  let start = today();
+  for (let i = 0; i < 365; i++) {
+    const end = addDays(start, durationDays);
+    if (countOverlaps(orders, start, end) < MAX_SLOTS)
+      return { startDate: new Date(start), endDate: new Date(end) };
+    start = addDays(start, 1);
+  }
+  return null;
+}
+function loadOrders() { try { const v = localStorage.getItem(STORAGE_KEY); return v ? JSON.parse(v) : []; } catch { return []; } }
+function saveOrders(o) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(o)); } catch {} }
+
+function AvailabilityBar({ orders }) {
+  const t = today();
+  const cells = Array.from({ length: 28 }, (_, i) => {
+    const day   = addDays(t, i);
+    const count = orders.filter(o => new Date(o.startDate) <= day && new Date(o.endDate) > day).length;
+    return { day, count };
+  });
+  return (
+    <div>
+      <div style={{ display:"flex", gap:3, marginBottom:6 }}>
+        {cells.map((c, i) => {
+          const bg = c.count >= MAX_SLOTS ? "#c97c6e" : c.count === 1 ? "#e8c97a" : "#b4d4b0";
+          return <div key={i} title={`${fmtS(c.day)}: ${c.count}/${MAX_SLOTS} slots used`}
+            style={{ flex:1, height:26, borderRadius:3, background:bg, opacity:.85, transition:"opacity .15s", cursor:"default" }}
+            onMouseEnter={e=>e.currentTarget.style.opacity=1}
+            onMouseLeave={e=>e.currentTarget.style.opacity=.85} />;
+        })}
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#bbb", fontFamily:"'Courier New',monospace" }}>
+        <span>today</span><span>{fmtS(addDays(t,13))}</span><span>{fmtS(addDays(t,27))}</span>
+      </div>
+      <div style={{ display:"flex", gap:14, marginTop:10, flexWrap:"wrap" }}>
+        {[["#b4d4b0","Available"],["#e8c97a","1 slot taken"],["#c97c6e","Fully booked"]].map(([c,l])=>(
+          <span key={l} style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#999" }}>
+            <span style={{ width:10, height:10, borderRadius:2, background:c, display:"inline-block" }}/>{l}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomerView({ orders, onAdmin }) {
+  const t         = today();
+  const activeNow = orders.filter(o => new Date(o.startDate) <= t && new Date(o.endDate) > t).length;
+  const slotsNow  = MAX_SLOTS - activeNow;
+  const isAvail   = slotsNow > 0;
+  const nextSlot  = findSlot(orders, 1);
+  const daysUntil = nextSlot ? Math.round((nextSlot.startDate - t) / 86400000) : 0;
+  const durations = [{label:"5-day wear",days:5},{label:"1 week",days:7},{label:"2 weeks",days:14},{label:"3 weeks",days:21}];
+
+  return (
+    <div style={{ animation:"fadein .4s ease" }}>
+      <div style={{ display:"flex", alignItems:"center", marginBottom:10 }}>
+        <span style={{ position:"relative", width:10, height:10, marginRight:8, display:"inline-block" }}>
+          <span style={{ display:"block", width:10, height:10, borderRadius:"50%",
+            background: isAvail ? "#7aab6e" : "#c97c6e",
+            animation: isAvail ? "pulse 2s infinite" : "none" }} />
+        </span>
+        <span style={{ fontSize:12, fontFamily:"'Courier New',monospace", letterSpacing:"0.07em", textTransform:"uppercase",
+          color: isAvail ? "#5a8a52" : "#a05a4a" }}>
+          {isAvail ? `${slotsNow} slot${slotsNow>1?"s":""} open now` : "fully booked"}
+        </span>
+      </div>
+
+      <h1 style={{ fontSize:26, fontWeight:"normal", color:"#2a1f1a", lineHeight:1.25, marginBottom:6 }}>
+        {isAvail ? "Taking orders now" : `Next slot opens ${nextSlot ? fmtS(nextSlot.startDate) : "soon"}`}
+      </h1>
+      {!isAvail && daysUntil > 0 &&
+        <p style={{ fontSize:13, color:"#aaa", fontFamily:"'Courier New',monospace", marginBottom:4 }}>
+          {daysUntil} day{daysUntil!==1?"s":""} until a slot frees up
+        </p>}
+
+      <div style={{ margin:"20px 0" }}>
+        <p style={{ fontSize:11, color:"#bbb", fontFamily:"'Courier New',monospace", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
+          Wear schedule — next 28 days
+        </p>
+        <AvailabilityBar orders={orders} />
+      </div>
+
+      <div>
+        <p style={{ fontSize:11, color:"#bbb", fontFamily:"'Courier New',monospace", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
+          Estimated ship dates if you order today
+        </p>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          {durations.map(({ label, days }) => {
+            const slot = findSlot(orders, days);
+            return (
+              <div key={label} style={{ background:"rgba(255,255,255,0.65)", border:"1px solid #e5ddd4", borderRadius:10, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, color:"#bbb", fontFamily:"'Courier New',monospace", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</div>
+                <div style={{ fontSize:15, color:"#2a1f1a" }}>Ships {slot ? fmtS(slot.endDate) : "—"}</div>
+                <div style={{ fontSize:11, color:"#ccc", fontFamily:"'Courier New',monospace", marginTop:2 }}>starts {slot ? fmtS(slot.startDate) : "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ textAlign:"right", marginTop:24 }}>
+        <button onClick={onAdmin} style={{ background:"none", border:"none", fontSize:11, color:"#ddd", cursor:"pointer", fontFamily:"'Courier New',monospace", letterSpacing:"0.05em" }}>
+          admin
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminView({ orders, setOrders, onBack }) {
+  const [pin,      setPin]      = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinErr,   setPinErr]   = useState(false);
+  const [newName,  setNewName]  = useState("");
+  const [newDur,   setNewDur]   = useState("7");
+  const [preview,  setPreview]  = useState(null);
+
+  useEffect(() => { setPreview(findSlot(orders, parseInt(newDur))); }, [newDur, orders]);
+
+  const tryPin = () => { if (pin === ADMIN_PIN) { setUnlocked(true); setPinErr(false); } else { setPinErr(true); setPin(""); } };
+
+  const addOrder = () => {
+    if (!newName.trim() || !preview) return;
+    setOrders(prev => [...prev, {
+      id: Date.now(), name: newName.trim(), duration: parseInt(newDur),
+      startDate: preview.startDate.toISOString(), endDate: preview.endDate.toISOString(),
+      color: PALETTE[prev.length % PALETTE.length],
+    }]);
+    setNewName("");
+  };
+
+  const inp = { fontSize:13, padding:"8px 12px", borderRadius:8, border:"1px solid #e0d5c8", background:"#fff", color:"#2a1f1a", fontFamily:"Georgia,serif", width:"100%", outline:"none" };
+  const btnP = { fontSize:13, padding:"9px 18px", borderRadius:8, border:"none", background:"#2a1f1a", color:"#fdf6ee", cursor:"pointer", fontFamily:"'Courier New',monospace", letterSpacing:"0.04em" };
+
+  const t      = today();
+  const sorted = [...orders].sort((a,b) => new Date(a.startDate)-new Date(b.startDate));
+
+  if (!unlocked) return (
+    <div style={{ animation:"fadein .3s ease" }}>
+      <button onClick={onBack} style={{ background:"none", border:"none", fontSize:12, color:"#bbb", cursor:"pointer", fontFamily:"'Courier New',monospace", marginBottom:20, padding:0 }}>← back</button>
+      <h2 style={{ fontWeight:"normal", fontSize:20, color:"#2a1f1a", marginBottom:6 }}>Admin panel</h2>
+      <p style={{ fontSize:13, color:"#aaa", fontFamily:"'Courier New',monospace", marginBottom:20 }}>Enter your PIN to manage orders</p>
+      <div style={{ display:"flex", gap:8 }}>
+        <input type="password" placeholder="PIN" value={pin} style={{ ...inp, width:110 }}
+          onChange={e=>{ setPin(e.target.value); setPinErr(false); }}
+          onKeyDown={e=>e.key==="Enter"&&tryPin()} />
+        <button style={btnP} onClick={tryPin}>Unlock</button>
+      </div>
+      {pinErr && <p style={{ fontSize:12, color:"#c97c6e", marginTop:8, fontFamily:"'Courier New',monospace" }}>Incorrect PIN</p>}
+      <p style={{ fontSize:11, color:"#ccc", marginTop:16, fontFamily:"'Courier New',monospace" }}>Default PIN is 1234 — change ADMIN_PIN at the top of the code</p>
+    </div>
+  );
+
+  return (
+    <div style={{ animation:"fadein .3s ease" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 }}>
+        <div>
+          <button onClick={onBack} style={{ background:"none", border:"none", fontSize:12, color:"#bbb", cursor:"pointer", fontFamily:"'Courier New',monospace", padding:0, display:"block", marginBottom:4 }}>← back to shop view</button>
+          <h2 style={{ fontWeight:"normal", fontSize:20, color:"#2a1f1a" }}>Order manager</h2>
+        </div>
+        <span style={{ fontSize:11, color:"#ccc", fontFamily:"'Courier New',monospace", marginTop:22 }}>{orders.length} order{orders.length!==1?"s":""}</span>
+      </div>
+
+      <div style={{ background:"#fff", border:"1px solid #e8ddd0", borderRadius:12, padding:"1.25rem", marginBottom:24 }}>
+        <p style={{ fontSize:11, color:"#bbb", fontFamily:"'Courier New',monospace", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:14 }}>Add new order</p>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+          <div>
+            <label style={{ fontSize:12, color:"#aaa", fontFamily:"'Courier New',monospace", display:"block", marginBottom:4 }}>Customer / order ref</label>
+            <input style={inp} value={newName} placeholder="e.g. Order #1042"
+              onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addOrder()} />
+          </div>
+          <div>
+            <label style={{ fontSize:12, color:"#aaa", fontFamily:"'Courier New',monospace", display:"block", marginBottom:4 }}>Wear duration</label>
+            <select style={inp} value={newDur} onChange={e=>setNewDur(e.target.value)}>
+              <option value="5">5 days</option>
+              <option value="7">1 week (7 days)</option>
+              <option value="14">2 weeks (14 days)</option>
+              <option value="21">3 weeks (21 days)</option>
+            </select>
+          </div>
+        </div>
+        {preview && (
+          <div style={{ background:"#faf7f4", borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:13 }}>
+            <span style={{ color:"#bbb", fontFamily:"'Courier New',monospace", fontSize:11 }}>SCHEDULED → </span>
+            <span style={{ color:"#2a1f1a" }}>Wear {fmtS(preview.startDate)} – {fmtS(preview.endDate)}</span>
+            <span style={{ color:"#bbb", fontSize:12, marginLeft:8 }}>· ships {fmtS(preview.endDate)}</span>
+          </div>
+        )}
+        <button style={{ ...btnP, width:"100%", textAlign:"center" }} onClick={addOrder}>Add to schedule</button>
+      </div>
+
+      <p style={{ fontSize:11, color:"#bbb", fontFamily:"'Courier New',monospace", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Current orders</p>
+      {sorted.length === 0 && <p style={{ fontSize:13, color:"#ccc", fontFamily:"'Courier New',monospace", padding:"1rem 0" }}>No orders yet.</p>}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {sorted.map(o => {
+          const start = new Date(o.startDate), end = new Date(o.endDate);
+          const status    = end<=t ? "shipped" : start<=t ? "wearing now" : "upcoming";
+          const statusCol = { "shipped":"#7aab6e","wearing now":"#7a9aab","upcoming":"#bbb" }[status];
+          return (
+            <div key={o.id} style={{ display:"flex", alignItems:"center", gap:10, background:"#fff", border:"1px solid #e8ddd0", borderRadius:10, padding:"10px 14px", animation:"fadein .25s ease" }}>
+              <div style={{ width:10, height:10, borderRadius:2, background:o.color, flexShrink:0 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, color:"#2a1f1a" }}>{o.name}</div>
+                <div style={{ fontSize:11, color:"#aaa", fontFamily:"'Courier New',monospace", marginTop:2 }}>
+                  {fmtS(start)} → {fmtS(end)} · {o.duration}d wear
+                </div>
+              </div>
+              <span style={{ fontSize:11, color:statusCol, fontFamily:"'Courier New',monospace", flexShrink:0 }}>{status}</span>
+              <button onClick={()=>setOrders(prev=>prev.filter(x=>x.id!==o.id))}
+                style={{ background:"none", border:"none", fontSize:18, color:"#ddd", cursor:"pointer", padding:"0 2px", lineHeight:1, flexShrink:0 }}>×</button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [orders, setOrders] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [view,   setView]   = useState("customer");
+
+  useEffect(() => { setOrders(loadOrders()); setLoaded(true); }, []);
+  useEffect(() => { if (loaded) saveOrders(orders); }, [orders, loaded]);
+
+  if (!loaded) return <div style={{ padding:"2rem", fontFamily:"'Courier New',monospace", fontSize:13, color:"#ccc" }}>Loading…</div>;
+
+  return (
+    <div style={{ width:"100%", maxWidth:580, background:"linear-gradient(135deg,#fdf6ee 0%,#f8f0e8 100%)", border:"1px solid #e8ddd0", borderRadius:18, padding:"2rem" }}>
+      {view === "customer"
+        ? <CustomerView orders={orders} onAdmin={()=>setView("admin")} />
+        : <AdminView    orders={orders} setOrders={setOrders} onBack={()=>setView("customer")} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
